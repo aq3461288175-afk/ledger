@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>小紫账本</title>
+    <title>祺账本</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="小紫账本">
+    <meta name="apple-mobile-web-app-title" content="祺账本">
     <!-- PWA 配置（添加到主屏幕必备） -->
     <link rel="manifest" href="data:application/json,{
-        &quot;name&quot;: &quot;小紫账本&quot;,
-        &quot;short_name&quot;: &quot;账本&quot;,
+        &quot;name&quot;: &quot;祺账本&quot;,
+        &quot;short_name&quot;: &quot;祺账本&quot;,
         &quot;start_url&quot;: &quot;.&quot;,
         &quot;display&quot;: &quot;standalone&quot;,
         &quot;background_color&quot;: &quot;#F6F1FF&quot;,
@@ -128,6 +128,7 @@
             align-items: center;
         }
         .section-sub { font-size: 11px; font-weight: 400; color: var(--text2); }
+        .section-actions { display: flex; align-items: center; gap: 8px; }
 
         /* ===== 预算进度条 ===== */
         .budget-row { margin-bottom: 10px; }
@@ -740,6 +741,54 @@
         }
         .cc-del:active { transform: scale(0.9); }
 
+        /* ===== 预算编辑弹窗 ===== */
+        .bm-tip { text-align: left; font-size: 11px; color: var(--text2); margin-bottom: 8px; }
+        .bm-rows { text-align: left; max-height: 250px; overflow-y: auto; }
+        .bm-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 2px;
+            border-bottom: 1px dashed var(--border);
+        }
+        .bm-row:last-child { border-bottom: none; }
+        .bm-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+        .bm-input {
+            width: 96px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            padding: 7px 10px;
+            font-size: 14px;
+            color: var(--text);
+            background: #fff;
+            outline: none;
+            text-align: right;
+        }
+        .bm-input:focus { border-color: var(--primary-dark); }
+        .bm-add { display: flex; gap: 8px; margin-top: 10px; }
+        .bm-add select {
+            flex: 1;
+            min-width: 0;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 13px;
+            color: var(--text);
+            background: #fff;
+            outline: none;
+        }
+        .bm-add-btn {
+            border: none;
+            background: var(--primary-light);
+            color: var(--primary-deep);
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 14px;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .bm-add-btn:active { transform: scale(0.95); }
+
         /* ===== Toast 提示 ===== */
         .toast {
             position: fixed;
@@ -769,7 +818,7 @@
     <div id="page-home" class="page active">
         <div class="container">
             <div class="app-header">
-                <div class="app-title">💜 小紫<span>账本</span></div>
+                <div class="app-title">💜 祺<span>账本</span></div>
                 <div class="header-actions">
                     <button class="icon-btn" onclick="exportData()" title="导出JSON">💾</button>
                     <button class="icon-btn" onclick="document.getElementById('fileInput').click()" title="导入JSON">📂</button>
@@ -794,7 +843,7 @@
 
             <!-- 预算进度条 -->
             <div class="section-card">
-                <div class="section-title">🎯 本月预算 <span class="section-sub">消费超过预算90%变红</span></div>
+                <div class="section-title"><span>🎯 本月预算</span><span class="section-actions"><span class="section-sub">消费超预算90%变红</span><button class="label-btn" onclick="openBudgetManager()">✏️ 编辑</button></span></div>
                 <div id="budgetList"></div>
             </div>
 
@@ -1086,11 +1135,23 @@
             document.getElementById('totalBalance').textContent = (inc - exp).toFixed(2);
         }
 
-        function getBudgets() {
+        // 读取指定月份的预算（该月没单独设置过则用内置默认）
+        function getBudgetsForMonth(monthKeyStr) {
             try {
                 const saved = JSON.parse(localStorage.getItem(BUDGET_KEY) || 'null');
-                return saved ? Object.assign({}, DEFAULT_BUDGETS, saved) : Object.assign({}, DEFAULT_BUDGETS);
-            } catch (e) { return Object.assign({}, DEFAULT_BUDGETS); }
+                if (saved && Object.prototype.hasOwnProperty.call(saved, monthKeyStr)) {
+                    return Object.assign({}, saved[monthKeyStr]);
+                }
+            } catch (e) { /* 忽略损坏数据 */ }
+            return Object.assign({}, DEFAULT_BUDGETS);
+        }
+
+        // 保存指定月份的预算
+        function saveBudgetsForMonth(monthKeyStr, budgets) {
+            let all = {};
+            try { all = JSON.parse(localStorage.getItem(BUDGET_KEY) || 'null') || {}; } catch (e) { all = {}; }
+            all[monthKeyStr] = budgets;
+            localStorage.setItem(BUDGET_KEY, JSON.stringify(all));
         }
 
         function monthSpent(cat, monthKeyStr) {
@@ -1103,8 +1164,15 @@
         function renderBudget() {
             const el = document.getElementById('budgetList');
             const monthKeyStr = localDateStr(0).slice(0, 7);
-            const budgets = getBudgets();
-            el.innerHTML = Object.entries(budgets).map(([cat, budget]) => {
+            const budgets = getBudgetsForMonth(monthKeyStr);
+            // 过滤掉已删除分类的孤儿预算
+            const existing = new Set(getCategories('expense').map(c => c.name));
+            const entries = Object.entries(budgets).filter(([cat]) => existing.has(cat));
+            if (!entries.length) {
+                el.innerHTML = '<div class="empty-mini">本月还没有设置预算，点右上角 ✏️ 编辑添加 💜</div>';
+                return;
+            }
+            el.innerHTML = entries.map(([cat, budget]) => {
                 const spent = monthSpent(cat, monthKeyStr);
                 const ratio = budget > 0 ? spent / budget : 0;
                 const pct = Math.min(100, ratio * 100).toFixed(0);
@@ -1562,6 +1630,115 @@
             if (document.getElementById('csCat')) fillCsCatOptions();
         }
 
+        // ============================================================
+        //  5.6 预算管理（按月、含自定义分类，可改可删）
+        // ============================================================
+        let bmMonthKey = '';
+
+        function openBudgetManager() {
+            bmMonthKey = localDateStr(0).slice(0, 7);
+            const [y, m] = bmMonthKey.split('-');
+            const thisYear = new Date().getFullYear();
+            let yOpts = '', mOpts = '';
+            for (let i = thisYear - 1; i <= thisYear + 1; i++) yOpts += `<option value="${i}" ${i === parseInt(y) ? 'selected' : ''}>${i}年</option>`;
+            for (let i = 1; i <= 12; i++) mOpts += `<option value="${i}" ${i === parseInt(m) ? 'selected' : ''}>${i}月</option>`;
+            const body = `
+                <div class="picker-row">
+                    <select id="bmYear" onchange="bmUpdateMonth()">${yOpts}</select>
+                    <select id="bmMonth" onchange="bmUpdateMonth()">${mOpts}</select>
+                </div>
+                <div class="bm-tip">💡 金额留空或填 0 的分类，保存后该月不再显示预算条</div>
+                <div class="bm-rows" id="bmRows">${bmRowsHTML()}</div>
+                <div class="bm-add">
+                    <select id="bmAddCat">${bmAddOptionsHTML()}</select>
+                    <button class="bm-add-btn" onclick="bmAddRow()">＋ 添加</button>
+                </div>`;
+            showModal('✏️ 编辑预算', body, [
+                { text: '恢复默认', cls: 'ghost', keepOpen: true, cb: bmRestoreDefaults },
+                { text: '保存', cls: 'primary', cb: bmSave },
+                { text: '取消', cls: 'ghost' }
+            ]);
+        }
+
+        // 当前编辑月份的预算（该月有单独记录用记录，否则用内置默认）
+        function bmCurrentBudgets() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(BUDGET_KEY) || 'null');
+                if (saved && Object.prototype.hasOwnProperty.call(saved, bmMonthKey)) {
+                    return Object.assign({}, saved[bmMonthKey]);
+                }
+            } catch (e) { /* 忽略 */ }
+            return Object.assign({}, DEFAULT_BUDGETS);
+        }
+
+        function bmRowsHTML(budgets) {
+            const entries = Object.entries(budgets || bmCurrentBudgets());
+            if (!entries.length) return '<div class="empty-mini">本月暂无预算</div>';
+            return entries.map(([cat, amount]) => `
+                <div class="bm-row">
+                    <span class="bm-name">${getCatEmoji('expense', cat)} ${escapeHtml(cat)}</span>
+                    <input type="number" class="bm-input" data-cat="${escapeHtml(cat)}" value="${amount}" min="0" step="100" inputmode="numeric" placeholder="留空=删">
+                    <button class="cc-del" data-cat="${escapeHtml(cat)}" onclick="bmDelRow(this)">✕</button>
+                </div>`).join('');
+        }
+
+        // 尚未设置预算的支出分类（含自定义分类）
+        function bmAddOptionsHTML() {
+            const rows = document.querySelectorAll('#bmRows .bm-input');
+            const used = new Set();
+            rows.forEach(i => used.add(i.dataset.cat));
+            const opts = getCategories('expense')
+                .filter(c => !used.has(c.name))
+                .map(c => `<option value="${escapeHtml(c.name)}">${c.emoji} ${escapeHtml(c.name)}</option>`);
+            return opts.length ? opts.join('') : '<option value="">所有分类都有预算了</option>';
+        }
+
+        function bmUpdateMonth() {
+            const y = document.getElementById('bmYear').value;
+            const m = document.getElementById('bmMonth').value.padStart(2, '0');
+            bmMonthKey = y + '-' + m;
+            document.getElementById('bmRows').innerHTML = bmRowsHTML();
+            document.getElementById('bmAddCat').innerHTML = bmAddOptionsHTML();
+        }
+
+        function bmRestoreDefaults() {
+            document.getElementById('bmRows').innerHTML = bmRowsHTML(DEFAULT_BUDGETS);
+            document.getElementById('bmAddCat').innerHTML = bmAddOptionsHTML();
+        }
+
+        function bmAddRow() {
+            const sel = document.getElementById('bmAddCat');
+            const cat = sel.value;
+            if (!cat) return;
+            const rowsEl = document.getElementById('bmRows');
+            const emptyEl = rowsEl.querySelector('.empty-mini');
+            if (emptyEl) emptyEl.remove();
+            const div = document.createElement('div');
+            div.className = 'bm-row';
+            div.innerHTML = `<span class="bm-name">${getCatEmoji('expense', cat)} ${escapeHtml(cat)}</span>
+                <input type="number" class="bm-input" data-cat="${escapeHtml(cat)}" value="500" min="0" step="100" inputmode="numeric" placeholder="留空=删">
+                <button class="cc-del" data-cat="${escapeHtml(cat)}" onclick="bmDelRow(this)">✕</button>`;
+            rowsEl.appendChild(div);
+            sel.innerHTML = bmAddOptionsHTML();
+        }
+
+        function bmDelRow(btn) {
+            btn.closest('.bm-row').remove();
+            const sel = document.getElementById('bmAddCat');
+            if (sel) sel.innerHTML = bmAddOptionsHTML();
+        }
+
+        function bmSave() {
+            const budgets = {};
+            document.querySelectorAll('#bmRows .bm-input').forEach(i => {
+                const v = parseFloat(i.value);
+                if (i.dataset.cat && !isNaN(v) && v > 0) budgets[i.dataset.cat] = Math.round(v * 100) / 100;
+            });
+            saveBudgetsForMonth(bmMonthKey, budgets);
+            renderBudget();
+            toast('✅ 预算已保存');
+        }
+
         function saveRecord() {
             const amountInput = document.getElementById('inputAmount');
             const amount = parseFloat(amountInput.value);
@@ -1603,7 +1780,7 @@
 
             // 超支提醒：该分类本月已超预算（仍允许保存）
             if (rec.type === 'expense') {
-                const budget = getBudgets()[rec.category];
+                const budget = getBudgetsForMonth(date.slice(0, 7))[rec.category];
                 if (budget) {
                     const spent = monthSpent(rec.category, date.slice(0, 7));
                     if (spent > budget) alert(`⚠️ ${rec.category} 本月已超支！`);
@@ -1867,7 +2044,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `小紫账本备份_${localDateStr(0)}.json`;
+            a.download = `祺账本备份_${localDateStr(0)}.json`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
